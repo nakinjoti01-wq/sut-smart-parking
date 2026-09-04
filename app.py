@@ -2,9 +2,16 @@ import streamlit as st
 import streamlit.components.v1 as components
 import base64
 import pandas as pd
-from datetime import datetime
+import altair as alt
+from datetime import datetime, timezone, timedelta
 
-# 1. ตั้งค่าหน้าเว็บ
+# 1. จัดการ Timezone ประเทศไทย (UTC+7)
+TH_TZ = timezone(timedelta(hours=7))
+
+def get_now_th():
+    return datetime.now(TH_TZ)
+
+# 2. ตั้งค่าหน้าเว็บ
 st.set_page_config(
     page_title="Smart Campus AI Parking Dashboard",
     page_icon="🛵",
@@ -22,7 +29,7 @@ def get_image_base64(image_path):
 SUT_LOGO_SRC = get_image_base64("SUT_Logo.png")
 TOTAL_SLOTS = 10
 
-# 2. Session State
+# 3. Session State
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
@@ -47,12 +54,13 @@ if "heatmap_matrix" not in st.session_state:
     }
 
 if "activity_logs" not in st.session_state:
+    now_str = get_now_th().strftime('%H:%M:%S')
     st.session_state["activity_logs"] = [
-        f"[{datetime.now().strftime('%H:%M:%S')}] System initialized / เริ่มต้นระบบตรวจจับ B1",
-        f"[{datetime.now().strftime('%H:%M:%S')}] Spatial ROI 10 slots ready / พื้นที่ 10 ช่องพร้อมใช้งาน"
+        f"[{now_str}] System initialized / เริ่มต้นระบบตรวจจับ B1",
+        f"[{now_str}] Spatial ROI 10 slots ready / พื้นที่ 10 ช่องพร้อมใช้งาน"
     ]
 
-# พจนานุกรม 2 ภาษา
+# สารบัญ 2 ภาษา
 LANG_DICT = {
     "ไทย": {
         "title": "Smart Motorcycle Parking Dashboard",
@@ -128,7 +136,7 @@ LANG_DICT = {
     }
 }
 
-# 3. CSS ปรับขนาดตัวอักษรให้อ่านง่าย คมชัดทุกจุด
+# 4. CSS Stylings
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap');
@@ -145,15 +153,14 @@ html, body, [class*="css"] { font-family: 'Kanit', sans-serif; }
 .block-container { padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1450px; }
 
 .top-navbar {
-    background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(14px);
-    padding: 16px 28px; border-radius: 20px; border: 1.5px solid rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(14px);
+    padding: 16px 28px; border-radius: 20px; border: 1.5px solid rgba(255, 255, 255, 1);
     box-shadow: 0 8px 30px rgba(234, 88, 12, 0.06); display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;
 }
 
-/* ขยายการ์ด KPI 4 ใบด้านบน */
 .kpi-card-styled {
-    background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(14px); border-radius: 20px; padding: 20px 22px;
-    border: 1.5px solid rgba(255, 255, 255, 0.95); box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(14px); border-radius: 20px; padding: 20px 22px;
+    border: 1.5px solid rgba(255, 255, 255, 1); box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
     position: relative; overflow: hidden; height: 135px; display: flex; flex-direction: column; justify-content: space-between; margin-bottom: 12px;
 }
 .kpi-label-text { font-size: 15px; font-weight: 700; color: #1E293B; letter-spacing: 0.3px; }
@@ -166,12 +173,24 @@ html, body, [class*="css"] { font-family: 'Kanit', sans-serif; }
 }
 
 .panel-box {
-    background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(14px); border: 1.5px solid rgba(255, 255, 255, 0.95);
-    border-radius: 20px; padding: 22px 24px; box-shadow: 0 8px 25px rgba(15, 23, 42, 0.04); margin-bottom: 18px;
+    background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(14px); border: 1.5px solid rgba(255, 255, 255, 1);
+    border-radius: 22px; padding: 22px 24px; box-shadow: 0 8px 25px rgba(15, 23, 42, 0.04); margin-bottom: 18px;
 }
+
+/* ปรับแต่งกรอบ st.container(border=True) ให้เป็นสีขาวเนียน ขอบมน 22px */
+[data-testid="stVerticalBlockBorderWrapper"] > div {
+    background: rgba(255, 255, 255, 0.95) !important;
+    backdrop-filter: blur(14px) !important;
+    border: 1.5px solid rgba(255, 255, 255, 1) !important;
+    border-radius: 22px !important;
+    padding: 22px 24px 16px 24px !important;
+    box-shadow: 0 8px 25px rgba(15, 23, 42, 0.04) !important;
+    margin-bottom: 18px !important;
+}
+
 .login-card {
-    background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(16px); border-radius: 24px;
-    border: 1.5px solid rgba(255, 255, 255, 0.95); padding: 44px 36px; box-shadow: 0 16px 40px rgba(234, 88, 12, 0.08); margin-top: 40px;
+    background: rgba(255, 255, 255, 0.96); backdrop-filter: blur(16px); border-radius: 24px;
+    border: 1.5px solid rgba(255, 255, 255, 1); padding: 44px 36px; box-shadow: 0 16px 40px rgba(234, 88, 12, 0.08); margin-top: 40px;
 }
 @media (max-width: 768px) {
     .top-navbar { flex-direction: column; align-items: flex-start; gap: 12px; }
@@ -203,6 +222,10 @@ if not st.session_state["authenticated"]:
                 else:
                     st.error("Invalid Student ID or Password")
 else:
+    now_th = get_now_th()
+    current_hour = now_th.hour
+    time_index = min(max(current_hour - 8, 0), 8)
+
     with st.sidebar:
         st.markdown("### 🌐 Language / ภาษา")
         selected_lang = st.radio("เลือกภาษา (Language):", ["ไทย", "English"], horizontal=True)
@@ -218,12 +241,10 @@ else:
         available_count = TOTAL_SLOTS - occupied_count
         current_occupancy_rate = (occupied_count / TOTAL_SLOTS) * 100
 
-        current_hour = datetime.now().hour
-        time_index = min(max(current_hour - 8, 0), 8)
         st.session_state["heatmap_matrix"]["Fri (Today) / ศุกร์"][time_index] = occupied_count
 
         if occupied_count != st.session_state["last_occupied"]:
-            curr_time = datetime.now().strftime("%H:%M:%S")
+            curr_time = now_th.strftime("%H:%M:%S")
             if occupied_count > st.session_state["last_occupied"]:
                 for slot in range(st.session_state["last_occupied"] + 1, occupied_count + 1):
                     slot_name = f"SLOT {slot:02d}"
@@ -312,10 +333,25 @@ else:
     with k4:
         st_color = "#DC2626" if available_count <= 2 else "#EA580C" if available_count <= 4 else "#059669"
         st_bg = "#FEF2F2" if available_count <= 2 else "#FFF7ED" if available_count <= 4 else "#ECFDF5"
+        
         if selected_lang == "ไทย":
-            st_text = "CRITICAL (ใกล้เต็ม)" if available_count <= 2 else "WARNING (เริ่มแน่น)" if available_count <= 4 else "NORMAL (ว่างปกติ)"
+            if available_count == 0:
+                st_text = "FULL (ที่จอดเต็ม)"
+            elif available_count <= 2:
+                st_text = "CRITICAL (ใกล้เต็ม)"
+            elif available_count <= 4:
+                st_text = "WARNING (เริ่มแน่น)"
+            else:
+                st_text = "NORMAL (ว่างปกติ)"
         else:
-            st_text = "CRITICAL (FULL)" if available_count <= 2 else "WARNING (BUSY)" if available_count <= 4 else "NORMAL (CLEAR)"
+            if available_count == 0:
+                st_text = "FULL (NO VACANCY)"
+            elif available_count <= 2:
+                st_text = "CRITICAL (NEAR FULL)"
+            elif available_count <= 4:
+                st_text = "WARNING (BUSY)"
+            else:
+                st_text = "NORMAL (CLEAR)"
 
         st.markdown(f"""
         <div class="kpi-card-styled" style="border-bottom: 4px solid {st_color};">
@@ -329,12 +365,9 @@ else:
     st.write("")
     tab_live, tab_heatmap = st.tabs([L["tab_live"], L["tab_stat"]])
 
-# Tab 1: Live Monitoring
+    # Tab 1: Live Monitoring
     with tab_live:
-        st.write("")
         grid_cols_css = "grid-template-columns: repeat(2, 1fr);" if "Mobile" in view_mode else "grid-template-columns: repeat(5, 1fr);"
-        
-        # ปรับความสูง iframe ให้ครอบคลุมกล่องสล็อตขนาดใหญ่ครบทุกแถว
         iframe_height = 860 if "Mobile" in view_mode else 410
         side_height = 440
         slot_box_height = 135
@@ -362,17 +395,17 @@ else:
         <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;600;700;800&display=swap" rel="stylesheet">
         <style>
             * {{ box-sizing: border-box; font-family: 'Kanit', sans-serif; margin: 0; padding: 0; }}
-            body {{ background: transparent; padding-bottom: 10px; }}
+            body {{ background: transparent; }}
             .panel {{ 
-                background: rgba(255, 255, 255, 0.92); 
+                background: rgba(255, 255, 255, 0.95); 
                 backdrop-filter: blur(14px); 
-                border: 1.5px solid rgba(255, 255, 255, 0.95); 
+                border: 1.5px solid rgba(255, 255, 255, 1); 
                 border-radius: 22px; 
-                padding: 22px 24px 28px 24px; 
+                padding: 20px 24px 22px 24px; 
                 box-shadow: 0 8px 25px rgba(15, 23, 42, 0.04); 
             }}
-            .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1.5px solid #E2E8F0; flex-wrap: wrap; gap: 8px; }}
-            .grid-container {{ display: grid; {grid_cols_css} gap: 16px; }}
+            .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1.5px solid #E2E8F0; flex-wrap: wrap; gap: 8px; }}
+            .grid-container {{ display: grid; {grid_cols_css} gap: 14px; }}
         </style>
         </head>
         <body>
@@ -393,10 +426,22 @@ else:
         </html>
         """
 
-        alert_msg = L["crit_sub"].format(available_count) if available_count <= 2 else L["stab_sub"]
-        alert_title = L["crit_title"] if available_count <= 2 else L["stab_title"]
-        alert_color = "#DC2626" if available_count <= 2 else "#16A34A"
-        alert_bg = "#FEF2F2" if available_count <= 2 else "#F0FDF4"
+        if available_count == 0:
+            alert_title = "PARKING FULL" if selected_lang == "English" else "ที่จอดรถเต็ม"
+            alert_msg = "No available slots left / ไม่มีช่องว่างพร้อมให้บริการ"
+            alert_color = "#DC2626"
+            alert_bg = "#FEF2F2"
+        elif available_count <= 2:
+            alert_title = L["crit_title"]
+            alert_msg = L["crit_sub"].format(available_count)
+            alert_color = "#DC2626"
+            alert_bg = "#FEF2F2"
+        else:
+            alert_title = L["stab_title"]
+            alert_msg = L["stab_sub"]
+            alert_color = "#16A34A"
+            alert_bg = "#F0FDF4"
+
         logs_html = "".join([f"<li style='margin-bottom:8px; font-size:13px; color:#1E293B; font-weight:500;'>{log}</li>" for log in st.session_state["activity_logs"][:3]])
 
         side_component = f"""
@@ -406,13 +451,13 @@ else:
         <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;600;700;800&display=swap" rel="stylesheet">
         <style>
             * {{ box-sizing: border-box; font-family: 'Kanit', sans-serif; margin: 0; padding: 0; }}
-            body {{ background: transparent; padding-bottom: 10px; }}
+            body {{ background: transparent; }}
             .panel {{ 
-                background: rgba(255, 255, 255, 0.92); 
+                background: rgba(255, 255, 255, 0.95); 
                 backdrop-filter: blur(14px); 
-                border: 1.5px solid rgba(255, 255, 255, 0.95); 
+                border: 1.5px solid rgba(255, 255, 255, 1); 
                 border-radius: 22px; 
-                padding: 20px 22px 24px 22px; 
+                padding: 20px 22px; 
                 box-shadow: 0 8px 25px rgba(15, 23, 42, 0.04); 
             }}
             .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1.5px solid #E2E8F0; }}
@@ -447,11 +492,9 @@ else:
 
         if "Mobile" in view_mode:
             components.html(slot_panel_html, height=iframe_height)
-            st.write("")
             components.html(side_component, height=side_height)
-            st.write("")
             st.markdown("""
-            <div class="panel-box">
+            <div class="panel-box" style="margin-top: -8px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <div>
                         <h4 style="margin:0; font-size:17px; font-weight:800; color:#0F172A;">📹 Live CCTV Feed & AI Bounding Box</h4>
@@ -469,9 +512,8 @@ else:
             col_main, col_side = st.columns([7.2, 2.8])
             with col_main:
                 components.html(slot_panel_html, height=iframe_height)
-                st.write("")
                 st.markdown("""
-                <div class="panel-box">
+                <div class="panel-box" style="margin-top: -6px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                         <div>
                             <h4 style="margin:0; font-size:17px; font-weight:800; color:#0F172A;">📹 Live CCTV Feed & AI Bounding Box</h4>
@@ -492,71 +534,98 @@ else:
     with tab_heatmap:
         st.write("")
         g_col1, g_col2 = st.columns(2) if "Desktop" in view_mode else (st.container(), st.container())
+
+        # กล่องที่ 1: อัตราการใช้งานเฉลี่ยสะสมรายวัน
         with g_col1:
-            st.markdown(f"""
-            <div class="panel-box">
-                <h4 style="margin:0; font-size:17px; font-weight:800; color:#0F172A;">{L["daily_chart_title"]}</h4>
-                <p style="margin:2px 0 14px 0; font-size:13.5px; color:#334155; font-weight:500;">{L["daily_chart_sub"]}</p>
-            """, unsafe_allow_html=True)
-            df_days = pd.DataFrame({
-                "Day": L["days"],
-                "Rate (%)": [72.0, 81.5, 76.0, 84.0, round(today_avg_rate, 1), 38.5, 26.0]
-            }).set_index("Day")
-            st.bar_chart(df_days, color="#EA580C", height=240)
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(f"""
+                <div style="margin-bottom: 12px;">
+                    <h4 style="margin:0; font-size:16px; font-weight:800; color:#0F172A;">{L["daily_chart_title"]}</h4>
+                    <p style="margin:3px 0 0 0; font-size:13px; color:#334155; font-weight:500;">{L["daily_chart_sub"]}</p>
+                </div>
+                """, unsafe_allow_html=True)
 
+                df_days = pd.DataFrame({
+                    "Day": L["days"],
+                    "Rate": [72.0, 81.5, 76.0, 84.0, round(today_avg_rate, 1), 38.5, 26.0],
+                    "Color": ["#EAB308", "#EC4899", "#10B981", "#F97316", "#0284C7", "#8B5CF6", "#EF4444"]
+                })
+
+                # ขยายความหนาแท่งกราฟเป็น size=32
+                chart_days = alt.Chart(df_days).mark_bar(cornerRadiusTopLeft=8, cornerRadiusTopRight=8, size=32).encode(
+                    x=alt.X('Day:N', sort=None, axis=alt.Axis(title=None, labelAngle=-25, labelFontSize=11.5, labelColor='#1E293B', labelFontWeight='bold')),
+                    y=alt.Y('Rate:Q', axis=alt.Axis(title='ความหนาแน่น (%)' if selected_lang == 'ไทย' else 'Occupancy (%)', labelFontSize=11.5, titleFontSize=11.5), scale=alt.Scale(domain=[0, 115])),
+                    color=alt.Color('Color:N', scale=None),
+                    tooltip=[alt.Tooltip('Day:N', title='วัน / Day'), alt.Tooltip('Rate:Q', title='อัตราเฉลี่ย (%)', format='.1f')]
+                ).properties(height=185).configure_view(strokeWidth=0)
+
+                st.altair_chart(chart_days, use_container_width=True)
+
+        # กล่องที่ 2: ความถี่การเข้า-ออกของรถในแต่ละช่อง
         with g_col2:
-            st.markdown(f"""
-            <div class="panel-box">
-                <h4 style="margin:0; font-size:17px; font-weight:800; color:#0F172A;">{L["slot_chart_title"]}</h4>
-                <p style="margin:2px 0 14px 0; font-size:13.5px; color:#334155; font-weight:500;">{L["slot_chart_sub"]}</p>
-            """, unsafe_allow_html=True)
-            df_slots = pd.DataFrame(
-                list(st.session_state["slot_turnover_counts"].items()),
-                columns=["Slot", "Cycles"]
-            ).set_index("Slot")
-            st.bar_chart(df_slots, color="#2563EB", height=240)
-            st.markdown("</div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(f"""
+                <div style="margin-bottom: 12px;">
+                    <h4 style="margin:0; font-size:16px; font-weight:800; color:#0F172A;">{L["slot_chart_title"]}</h4>
+                    <p style="margin:3px 0 0 0; font-size:13px; color:#334155; font-weight:500;">{L["slot_chart_sub"]}</p>
+                </div>
+                """, unsafe_allow_html=True)
 
+                df_slots = pd.DataFrame(
+                    list(st.session_state["slot_turnover_counts"].items()),
+                    columns=["Slot", "Cycles"]
+                )
+                max_cycles = max(df_slots["Cycles"]) if len(df_slots) > 0 else 10
+
+                # ขยายความหนาแท่งกราฟเป็น size=22
+                chart_slots = alt.Chart(df_slots).mark_bar(cornerRadiusTopLeft=8, cornerRadiusTopRight=8, size=22, color='#2563EB').encode(
+                    x=alt.X('Slot:N', axis=alt.Axis(title=None, labelAngle=-30, labelFontSize=11, labelColor='#1E293B', labelFontWeight='bold')),
+                    y=alt.Y('Cycles:Q', axis=alt.Axis(title='รอบ / Cycles', labelFontSize=11.5, titleFontSize=11.5, tickMinStep=1), scale=alt.Scale(domain=[0, max_cycles + 2.5])),
+                    tooltip=[alt.Tooltip('Slot:N', title='ช่องจอด'), alt.Tooltip('Cycles:Q', title='จำนวนรอบ (ครั้ง)')]
+                ).properties(height=185).configure_view(strokeWidth=0)
+
+                st.altair_chart(chart_slots, use_container_width=True)
+
+        # HeatMatrix 7 Days
         time_cols = ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00"]
         active_time_label = time_cols[time_index]
 
         st.markdown(f"""
         <div class="panel-box">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
-                <h4 style="margin:0; font-size:17px; font-weight:800; color:#0F172A;">{L["heat_title"]}</h4>
-                <span style="background: rgba(239, 246, 255, 0.95); color:#2563EB; font-size:12px; font-weight:800; padding:5px 12px; border-radius:14px; border:1.5px solid #BFDBFE;">
+                <h4 style="margin:0; font-size:16px; font-weight:800; color:#0F172A;">{L["heat_title"]}</h4>
+                <span style="background: rgba(239, 246, 255, 0.95); color:#2563EB; font-size:12px; font-weight:800; padding:4px 12px; border-radius:14px; border:1.5px solid #BFDBFE;">
                     ⚡ {L["live_label"]}: {active_time_label}
                 </span>
             </div>
-            <p style="margin:0 0 14px 0; font-size:13.5px; color:#334155; font-weight:500;">{L["heat_sub"]}</p>
+            <p style="margin:0 0 12px 0; font-size:13px; color:#334155; font-weight:500;">{L["heat_sub"]}</p>
         """, unsafe_allow_html=True)
 
         table_rows = ""
         for day_name, row in st.session_state["heatmap_matrix"].items():
             is_today = "Today" in day_name or "วันนี้" in day_name
             day_label_style = "color:#EA580C; font-weight:800; background: rgba(255, 247, 237, 0.95);" if is_today else "color:#1E293B; font-weight:700; background: rgba(248, 250, 252, 0.95);"
-            row_tds = f"<td style='padding:10px 14px; font-size:14px; {day_label_style}'>{day_name}</td>"
+            row_tds = f"<td style='padding:8px 12px; font-size:13.5px; {day_label_style}'>{day_name}</td>"
             for idx, val in enumerate(row):
                 if is_today and idx == time_index:
                     bg = "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)"
                     txt_color = "#FFFFFF"
                     cell_style = "border: 2px solid #60A5FA; transform: scale(1.06); box-shadow: 0 4px 12px rgba(37,99,235,0.45); z-index: 2;"
-                    badge_html = f"<div style='font-size:18px; font-weight:800; line-height:1.1;'>{val}</div><div style='font-size:9.5px; background:rgba(255,255,255,0.25); border-radius:4px; padding:2px 0; margin-top:2px; letter-spacing:0.5px; font-weight:800;'>● LIVE NOW</div>"
+                    badge_html = f"<div style='font-size:17px; font-weight:800; line-height:1.1;'>{val}</div><div style='font-size:9px; background:rgba(255,255,255,0.25); border-radius:4px; padding:1px 0; margin-top:2px; letter-spacing:0.5px; font-weight:800;'>● LIVE NOW</div>"
                 else:
                     alpha = max(0.08, (val - 1) / 9)
                     bg = f"rgba(234, 88, 12, {alpha:.2f})"
                     txt_color = "#FFFFFF" if alpha > 0.52 else "#0F172A"
                     cell_style = "border: none;"
-                    badge_html = f"<div style='font-size:14px; font-weight:800;'>{val}</div>"
-                row_tds += f"<td style='padding:8px; text-align:center; background:{bg}; color:{txt_color}; border-radius:8px; {cell_style}'>{badge_html}</td>"
+                    badge_html = f"<div style='font-size:13.5px; font-weight:800;'>{val}</div>"
+                row_tds += f"<td style='padding:7px; text-align:center; background:{bg}; color:{txt_color}; border-radius:8px; {cell_style}'>{badge_html}</td>"
             table_rows += f"<tr>{row_tds}</tr>"
 
-        th_headers = "".join([f"<th style='padding:10px; text-align:center; font-size:13.5px; color:#1E293B; font-weight:700;'>{t}</th>" for t in time_cols])
+        th_headers = "".join([f"<th style='padding:8px; text-align:center; font-size:13px; color:#1E293B; font-weight:700;'>{t}</th>" for t in time_cols])
         st.markdown(f"""
             <div style="overflow-x:auto;">
                 <table style="width:100%; border-collapse:separate; border-spacing:5px;">
-                    <thead><tr><th style="padding:10px 14px; text-align:left; font-size:13.5px; color:#1E293B; font-weight:800;">Day / Time</th>{th_headers}</tr></thead>
+                    <thead><tr><th style="padding:8px 12px; text-align:left; font-size:13px; color:#1E293B; font-weight:800;">Day / Time</th>{th_headers}</tr></thead>
                     <tbody>{table_rows}</tbody>
                 </table>
             </div>
