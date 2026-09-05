@@ -1,0 +1,6 @@
+path: c:/Users/Nakin/Desktop/ENG51 170X/my_dataset
+train: c:/Users/Nakin/Desktop/ENG51 170X/my_dataset/train/images
+val: c:/Users/Nakin/Desktop/ENG51 170X/my_dataset/train/images
+
+names:
+  0: motorcycle
