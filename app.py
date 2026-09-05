@@ -1,9 +1,22 @@
+"""
+========================================================================================
+Project: Smart Motorcycle Parking Dashboard (Zone B1)
+Architecture: Streamlit Non-Blocking Multi-Tab Live Stream & Analytics Architecture
+========================================================================================
+"""
+
 import streamlit as st
 import streamlit.components.v1 as components
 import base64
+import os
+import cv2
+import numpy as np
+import torch
 import pandas as pd
 import altair as alt
+import time
 from datetime import datetime, timezone, timedelta
+from ultralytics import YOLO
 
 # 1. จัดการ Timezone ประเทศไทย (UTC+7)
 TH_TZ = timezone(timedelta(hours=7))
@@ -13,11 +26,35 @@ def get_now_th():
 
 # 2. ตั้งค่าหน้าเว็บ
 st.set_page_config(
-    page_title="Smart Campus AI Parking Dashboard",
+    page_title="Smart Motorcycle Parking Dashboard",
     page_icon="🛵",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# 3. Hardware Acceleration & YOLO11 Pipeline
+DEVICE = 0 if torch.cuda.is_available() else "cpu"
+if DEVICE == 0:
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+@st.cache_resource(show_spinner=False)
+def initialize_deep_learning_pipeline():
+    model_candidates = [
+        "runs/detect/sut_model_gpu/weights/best.pt",
+        "runs/detect/sut_model/weights/best.pt",
+        "yolo11x.pt",
+        "yolo11n.pt"
+    ]
+    for path in model_candidates:
+        if os.path.exists(path):
+            net = YOLO(path)
+            if DEVICE == 0:
+                net.to("cuda")
+            return net
+    return None
+
+yolo_model = initialize_deep_learning_pipeline()
 
 def get_image_base64(image_path):
     try:
@@ -29,28 +66,51 @@ def get_image_base64(image_path):
 SUT_LOGO_SRC = get_image_base64("SUT_Logo.png")
 TOTAL_SLOTS = 10
 
-# 3. Session State
+# Precision Mouse-Picked Spatial ROI Grid Matrix (10 Pilot Slots Zone B1)
+SLOT_POLYGONS = [
+    np.array([[1049, 401], [1008, 457], [877, 441], [942, 392]], np.int32),  # SLOT 01
+    np.array([[924, 391], [853, 438], [743, 420], [831, 383]], np.int32),  # SLOT 02
+    np.array([[813, 382], [732, 417], [639, 406], [731, 375]], np.int32),  # SLOT 03
+    np.array([[714, 374], [617, 406], [538, 397], [638, 369]], np.int32),  # SLOT 04
+    np.array([[522, 397], [625, 368], [557, 362], [451, 388]], np.int32),  # SLOT 05
+    np.array([[437, 384], [371, 378], [482, 356], [536, 361]], np.int32),  # SLOT 06
+    np.array([[457, 355], [357, 376], [297, 369], [418, 349]], np.int32),  # SLOT 07
+    np.array([[360, 348], [408, 352], [285, 370], [238, 365]], np.int32),  # SLOT 08
+    np.array([[349, 344], [224, 361], [171, 356], [309, 341]], np.int32),  # SLOT 09
+    np.array([[230, 335], [118, 349], [166, 356], [289, 339]], np.int32)   # SLOT 10
+]
+
+# 4. Session State Initialization
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = "tab_live"
+
 if "last_occupied" not in st.session_state:
-    st.session_state["last_occupied"] = 5
+    st.session_state["last_occupied"] = 7
 
 if "today_rates" not in st.session_state:
-    st.session_state["today_rates"] = [50.0]
+    st.session_state["today_rates"] = [50.0, 70.0]
+
+if "slot_history_deep" not in st.session_state:
+    st.session_state["slot_history_deep"] = [[False] * TOTAL_SLOTS for _ in range(25)]
+
+if "current_slot_states" not in st.session_state:
+    st.session_state["current_slot_states"] = [False] * TOTAL_SLOTS
 
 if "slot_turnover_counts" not in st.session_state:
     st.session_state["slot_turnover_counts"] = {f"SLOT {i:02d}": (4 if i <= 4 else 7) for i in range(1, TOTAL_SLOTS + 1)}
 
 if "heatmap_matrix" not in st.session_state:
     st.session_state["heatmap_matrix"] = {
-        "Mon / จันทร์":    [9, 10, 10, 8, 9, 7, 6, 5, 4],
-        "Tue / อังคาร":   [8, 9, 10, 9, 8, 6, 5, 4, 3],
-        "Wed / พุธ":      [7, 9, 10, 10, 8, 7, 6, 4, 4],
-        "Thu / พฤหัส":    [8, 10, 10, 9, 8, 6, 5, 5, 3],
-        "Fri (Today) / ศุกร์": [6, 7, 8, 7, 5, 5, 4, 3, 2],
-        "Sat / เสาร์":    [2, 3, 4, 5, 5, 4, 3, 2, 1],
-        "Sun / อาทิตย์":  [1, 1, 2, 3, 3, 2, 2, 1, 1]
+        "วันจันทร์":     [9, 10, 10, 8, 9, 7, 6, 5, 4],
+        "วันอังคาร":    [8, 9, 10, 9, 8, 6, 5, 4, 3],
+        "วันพุธ":       [7, 9, 10, 10, 8, 7, 6, 4, 4],
+        "วันพฤหัสบดี":   [8, 10, 10, 9, 8, 6, 5, 5, 3],
+        "วันศุกร์":      [7, 8, 9, 8, 7, 7, 6, 4, 3],
+        "วันเสาร์":     [2, 3, 4, 5, 5, 4, 3, 2, 1],
+        "วันอาทิตย์":   [1, 1, 2, 3, 3, 2, 2, 1, 1]
     }
 
 if "activity_logs" not in st.session_state:
@@ -60,7 +120,7 @@ if "activity_logs" not in st.session_state:
         f"[{now_str}] Spatial ROI 10 slots ready / พื้นที่ 10 ช่องพร้อมใช้งาน"
     ]
 
-# สารบัญ 2 ภาษา
+# 5. สารบัญ 2 ภาษา
 LANG_DICT = {
     "ไทย": {
         "title": "Smart Motorcycle Parking Dashboard",
@@ -92,11 +152,11 @@ LANG_DICT = {
         "daily_chart_sub": "ผลรวมเปอร์เซ็นต์ความหนาแน่น ÷ รอบการตรวจจับในแต่ละวัน (ครบ 7 วัน)",
         "slot_chart_title": "🔄 ความถี่การเข้า-ออกของรถในแต่ละช่อง (รอบ)",
         "slot_chart_sub": "วิเคราะห์จำนวนครั้งที่มีการเข้าและออกจากช่องจริง (SLOT 01 - 10)",
-        "heat_title": "⏱️ ช่วงเวลาหนาแน่นสูงสุดในรอบสัปดาห์ (Peak Hours HeatMatrix 7 Days)",
-        "heat_sub": "จำนวนรถเข้าจอดเฉลี่ยรายชั่วโมง (08:00 - 17:00 น.) • ช่องเวลาปัจจุบันแสดงเป็นสีน้ำเงินเรืองแสง",
+        "heat_title": "⏱️ ช่วงเวลาหนาแน่นสูงสุดในรอบสัปดาห์ (เวลาราชการ 08:00 - 16:00 น.)",
+        "heat_sub": "จำนวนรถเข้าจอดเฉลี่ยรายชั่วโมง (08:00 - 16:00 น.) • ช่องเวลาปัจจุบันแสดงเป็นสีน้ำเงินเรืองแสง",
         "live_label": "ช่องเวลาปัจจุบัน",
         "logout": "🚪 ออกจากระบบ (Logout)",
-        "days": ["1.จันทร์", "2.อังคาร", "3.พุธ", "4.พฤหัส", "5.วันนี้ (ศุกร์)", "6.เสาร์", "7.อาทิตย์"]
+        "days": ["วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์ (วันนี้)", "วันอาทิตย์"]
     },
     "English": {
         "title": "Smart Motorcycle Parking Dashboard",
@@ -125,22 +185,21 @@ LANG_DICT = {
         "stats_title": "📊 STATS & HEALTH",
         "rounds": "cycles",
         "daily_chart_title": "📈 Daily Average Space Utilization (%)",
-        "daily_chart_sub": "Sum of occupancy rates ÷ Total detection cycles per day (7 Days)",
         "slot_chart_title": "🔄 Slot Turnover Frequency (Cycles)",
-        "slot_chart_sub": "Turnover count based on vehicle arrival and departure (SLOT 01 - 10)",
-        "heat_title": "⏱️ Weekly Peak Hours Matrix (7 Days)",
-        "heat_sub": "Average occupied slots per hour (08:00 - 17:00) • Active hour in highlighted Cyber Blue",
+        "heat_title": "⏱️ Weekly Peak Hours Matrix (08:00 - 16:00)",
+        "heat_sub": "Average occupied slots per hour (08:00 - 16:00) • Active hour in highlighted Cyber Blue",
         "live_label": "Active Hour",
         "logout": "🚪 Log Out",
-        "days": ["1.Mon", "2.Tue", "3.Wed", "4.Thu", "5.Today (Fri)", "6.Sat", "7.Sun"]
+        "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday (Today)", "Sunday"]
     }
 }
 
-# 4. CSS Stylings
+# 6. CSS Stylings
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap');
 html, body, [class*="css"] { font-family: 'Kanit', sans-serif; }
+header [data-testid="stToolbarActions"], header [data-testid="stHeaderActionElements"] { display: none !important; }
 
 .stApp {
     background: radial-gradient(at 10% 10%, rgba(186, 230, 253, 0.45) 0px, transparent 50%),
@@ -177,7 +236,6 @@ html, body, [class*="css"] { font-family: 'Kanit', sans-serif; }
     border-radius: 22px; padding: 22px 24px; box-shadow: 0 8px 25px rgba(15, 23, 42, 0.04); margin-bottom: 18px;
 }
 
-/* ปรับแต่งกรอบ st.container(border=True) ให้เป็นสีขาวเนียน ขอบมน 22px */
 [data-testid="stVerticalBlockBorderWrapper"] > div {
     background: rgba(255, 255, 255, 0.95) !important;
     backdrop-filter: blur(14px) !important;
@@ -191,9 +249,6 @@ html, body, [class*="css"] { font-family: 'Kanit', sans-serif; }
 .login-card {
     background: rgba(255, 255, 255, 0.96); backdrop-filter: blur(16px); border-radius: 24px;
     border: 1.5px solid rgba(255, 255, 255, 1); padding: 44px 36px; box-shadow: 0 16px 40px rgba(234, 88, 12, 0.08); margin-top: 40px;
-}
-@media (max-width: 768px) {
-    .top-navbar { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -225,6 +280,7 @@ else:
     now_th = get_now_th()
     current_hour = now_th.hour
     time_index = min(max(current_hour - 8, 0), 8)
+    today_weekday = 5  # วันเสาร์
 
     with st.sidebar:
         st.markdown("### 🌐 Language / ภาษา")
@@ -236,34 +292,16 @@ else:
         view_mode = st.radio("รูปแบบมุมมอง:", ["🖥️ Desktop View", "📱 Mobile View"], index=0)
 
         st.divider()
-        st.markdown("### ⚙️ Simulation Panel")
-        occupied_count = st.slider("Occupied Slots", 0, TOTAL_SLOTS, st.session_state["last_occupied"])
+        st.markdown("### ⚙️ Detection Mode")
+        detect_mode = st.radio("แหล่งข้อมูลตรวจจับ:", ["🤖 AI Real-Time Model", "🎛️ Manual Simulation"], index=0)
+
+        if detect_mode == "🎛️ Manual Simulation":
+            occupied_count = st.slider("Occupied Slots", 0, TOTAL_SLOTS, st.session_state["last_occupied"])
+        else:
+            occupied_count = st.session_state["last_occupied"]
+
         available_count = TOTAL_SLOTS - occupied_count
         current_occupancy_rate = (occupied_count / TOTAL_SLOTS) * 100
-
-        st.session_state["heatmap_matrix"]["Fri (Today) / ศุกร์"][time_index] = occupied_count
-
-        if occupied_count != st.session_state["last_occupied"]:
-            curr_time = now_th.strftime("%H:%M:%S")
-            if occupied_count > st.session_state["last_occupied"]:
-                for slot in range(st.session_state["last_occupied"] + 1, occupied_count + 1):
-                    slot_name = f"SLOT {slot:02d}"
-                    rate_step = (slot / TOTAL_SLOTS) * 100
-                    st.session_state["today_rates"].append(rate_step)
-                    st.session_state["slot_turnover_counts"][slot_name] += 1
-                    act_txt = f"{slot_name} เข้าจอด ({rate_step:.0f}%)" if selected_lang == "ไทย" else f"{slot_name} Arrived ({rate_step:.0f}%)"
-                    st.session_state["activity_logs"].insert(0, f"[{curr_time}] {act_txt}")
-            else:
-                for slot in range(st.session_state["last_occupied"], occupied_count, -1):
-                    slot_name = f"SLOT {slot:02d}"
-                    rate_step = ((slot - 1) / TOTAL_SLOTS) * 100
-                    st.session_state["today_rates"].append(rate_step)
-                    st.session_state["slot_turnover_counts"][slot_name] += 1
-                    act_txt = f"{slot_name} ออกจากช่อง ({rate_step:.0f}%)" if selected_lang == "ไทย" else f"{slot_name} Departed ({rate_step:.0f}%)"
-                    st.session_state["activity_logs"].insert(0, f"[{curr_time}] {act_txt}")
-
-            st.session_state["activity_logs"] = st.session_state["activity_logs"][:4]
-            st.session_state["last_occupied"] = occupied_count
 
         today_avg_rate = sum(st.session_state["today_rates"]) / len(st.session_state["today_rates"])
 
@@ -271,7 +309,7 @@ else:
         st.markdown("### 📡 Hardware & AI Status")
         st.markdown(f"""
         * **Camera:** `Hikvision 1080p (B1)`
-        * **Model:** `YOLO11-Nano Edge`
+        * **Model:** `YOLO11-Nano (RTX 3080)`
         * **Daily Avg:** `{today_avg_rate:.1f}%`
         """)
         if st.button(L["logout"], use_container_width=True):
@@ -295,86 +333,80 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-    # 4 Cards KPI
-    k1, k2, k3, k4 = st.columns(4)
-    unit_slot = "ช่อง" if selected_lang == "ไทย" else "slots"
-    unit_bike = "คัน" if selected_lang == "ไทย" else "bikes"
+    # 4 Cards KPI Placeholder
+    kpi_placeholder = st.empty()
 
-    with k1:
-        st.markdown(f"""
-        <div class="kpi-card-styled" style="border-bottom: 4px solid #2563EB;">
-            <div class="kpi-icon-badge" style="background: #EFF6FF; color: #2563EB;">🅿️</div>
-            <div class="kpi-label-text">{L["total_slots"]}</div>
-            <div class="kpi-num-text" style="color: #0F172A;">{TOTAL_SLOTS} <span class="kpi-unit-text">{unit_slot}</span></div>
-            <div class="kpi-sub-text" style="color: #2563EB;">{L["zone_tag"]}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with k2:
-        st.markdown(f"""
-        <div class="kpi-card-styled" style="border-bottom: 4px solid #059669;">
-            <div class="kpi-icon-badge" style="background: #ECFDF5; color: #059669;">✨</div>
-            <div class="kpi-label-text">{L["available"]}</div>
-            <div class="kpi-num-text" style="color: #059669;">{available_count} <span class="kpi-unit-text">{unit_slot}</span></div>
-            <div class="kpi-sub-text" style="color: #059669;">{L["avail_tag"]}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with k3:
-        st.markdown(f"""
-        <div class="kpi-card-styled" style="border-bottom: 4px solid #DC2626;">
-            <div class="kpi-icon-badge" style="background: #FEF2F2; color: #DC2626;">🛵</div>
-            <div class="kpi-label-text">{L["occupied"]}</div>
-            <div class="kpi-num-text" style="color: #DC2626;">{occupied_count} <span class="kpi-unit-text">{unit_bike}</span></div>
-            <div class="kpi-sub-text" style="color: #DC2626;">{L["occ_tag"]} {current_occupancy_rate:.0f}%</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with k4:
-        st_color = "#DC2626" if available_count <= 2 else "#EA580C" if available_count <= 4 else "#059669"
-        st_bg = "#FEF2F2" if available_count <= 2 else "#FFF7ED" if available_count <= 4 else "#ECFDF5"
+    def render_kpi_cards(occ, avail, rate, avg_rate):
+        unit_slot = "ช่อง" if selected_lang == "ไทย" else "slots"
+        unit_bike = "คัน" if selected_lang == "ไทย" else "bikes"
+        st_color = "#DC2626" if avail <= 2 else "#EA580C" if avail <= 4 else "#059669"
+        st_bg = "#FEF2F2" if avail <= 2 else "#FFF7ED" if avail <= 4 else "#ECFDF5"
         
         if selected_lang == "ไทย":
-            if available_count == 0:
-                st_text = "FULL (ที่จอดเต็ม)"
-            elif available_count <= 2:
-                st_text = "CRITICAL (ใกล้เต็ม)"
-            elif available_count <= 4:
-                st_text = "WARNING (เริ่มแน่น)"
-            else:
-                st_text = "NORMAL (ว่างปกติ)"
+            st_text = "FULL (ที่จอดเต็ม)" if avail == 0 else "CRITICAL (ใกล้เต็ม)" if avail <= 2 else "WARNING (เริ่มแน่น)" if avail <= 4 else "NORMAL (ว่างปกติ)"
         else:
-            if available_count == 0:
-                st_text = "FULL (NO VACANCY)"
-            elif available_count <= 2:
-                st_text = "CRITICAL (NEAR FULL)"
-            elif available_count <= 4:
-                st_text = "WARNING (BUSY)"
-            else:
-                st_text = "NORMAL (CLEAR)"
+            st_text = "FULL (NO VACANCY)" if avail == 0 else "CRITICAL (NEAR FULL)" if avail <= 2 else "WARNING (BUSY)" if avail <= 4 else "NORMAL (CLEAR)"
 
-        st.markdown(f"""
-        <div class="kpi-card-styled" style="border-bottom: 4px solid {st_color};">
-            <div class="kpi-icon-badge" style="background: {st_bg}; color: {st_color};">⚡</div>
-            <div class="kpi-label-text">{L["status"]}</div>
-            <div class="kpi-num-text" style="color: {st_color}; font-size: 23px; margin-top: 6px;">{st_text}</div>
-            <div class="kpi-sub-text" style="color: #334155;">{L["daily_avg"]}: <b style="color:{st_color}; font-size:15px;">{today_avg_rate:.1f}%</b></div>
+        return f"""
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+            <div class="kpi-card-styled" style="border-bottom: 4px solid #2563EB;">
+                <div class="kpi-icon-badge" style="background: #EFF6FF; color: #2563EB;">🅿️</div>
+                <div class="kpi-label-text">{L["total_slots"]}</div>
+                <div class="kpi-num-text" style="color: #0F172A;">{TOTAL_SLOTS} <span class="kpi-unit-text">{unit_slot}</span></div>
+                <div class="kpi-sub-text" style="color: #2563EB;">{L["zone_tag"]}</div>
+            </div>
+            <div class="kpi-card-styled" style="border-bottom: 4px solid #059669;">
+                <div class="kpi-icon-badge" style="background: #ECFDF5; color: #059669;">✨</div>
+                <div class="kpi-label-text">{L["available"]}</div>
+                <div class="kpi-num-text" style="color: #059669;">{avail} <span class="kpi-unit-text">{unit_slot}</span></div>
+                <div class="kpi-sub-text" style="color: #059669;">{L["avail_tag"]}</div>
+            </div>
+            <div class="kpi-card-styled" style="border-bottom: 4px solid #DC2626;">
+                <div class="kpi-icon-badge" style="background: #FEF2F2; color: #DC2626;">🛵</div>
+                <div class="kpi-label-text">{L["occupied"]}</div>
+                <div class="kpi-num-text" style="color: #DC2626;">{occ} <span class="kpi-unit-text">{unit_bike}</span></div>
+                <div class="kpi-sub-text" style="color: #DC2626;">{L["occ_tag"]} {rate:.0f}%</div>
+            </div>
+            <div class="kpi-card-styled" style="border-bottom: 4px solid {st_color};">
+                <div class="kpi-icon-badge" style="background: {st_bg}; color: {st_color};">⚡</div>
+                <div class="kpi-label-text">{L["status"]}</div>
+                <div class="kpi-num-text" style="color: {st_color}; font-size: 23px; margin-top: 6px;">{st_text}</div>
+                <div class="kpi-sub-text" style="color: #334155;">{L["daily_avg"]}: <b style="color:{st_color}; font-size:15px;">{avg_rate:.1f}%</b></div>
+            </div>
         </div>
-        """, unsafe_allow_html=True)
+        """
+
+    kpi_placeholder.markdown(render_kpi_cards(occupied_count, available_count, current_occupancy_rate, today_avg_rate), unsafe_allow_html=True)
 
     st.write("")
-    tab_live, tab_heatmap = st.tabs([L["tab_live"], L["tab_stat"]])
 
-    # Tab 1: Live Monitoring
-    with tab_live:
-        grid_cols_css = "grid-template-columns: repeat(2, 1fr);" if "Mobile" in view_mode else "grid-template-columns: repeat(5, 1fr);"
-        iframe_height = 860 if "Mobile" in view_mode else 410
-        side_height = 440
-        slot_box_height = 135
+    # แถบแท็บนำทางในบรรทัดเดิมแบบไม่หลุดเลย์เอาต์ (Non-blocking Tabs)
+    tab_col1, tab_col2, _ = st.columns([0.25, 0.35, 0.40])
+    with tab_col1:
+        is_live = (st.session_state["active_tab"] == "tab_live")
+        btn_type_live = "primary" if is_live else "secondary"
+        if st.button(L["tab_live"], type=btn_type_live, use_container_width=True):
+            st.session_state["active_tab"] = "tab_live"
+            st.rerun()
 
+    with tab_col2:
+        is_stat = (st.session_state["active_tab"] == "tab_stat")
+        btn_type_stat = "primary" if is_stat else "secondary"
+        if st.button(L["tab_stat"], type=btn_type_stat, use_container_width=True):
+            st.session_state["active_tab"] = "tab_stat"
+            st.rerun()
+
+    st.write("")
+
+    grid_cols_css = "grid-template-columns: repeat(2, 1fr);" if "Mobile" in view_mode else "grid-template-columns: repeat(5, 1fr);"
+    iframe_height = 860 if "Mobile" in view_mode else 410
+    side_height = 440
+    slot_box_height = 135
+
+    def build_slot_panel_html(flags, occ, avail):
         slots_boxes = ""
         for i in range(1, TOTAL_SLOTS + 1):
-            is_busy = i <= occupied_count
+            is_busy = flags[i - 1]
             bg_color = "linear-gradient(145deg, #EF4444 0%, #DC2626 100%)" if is_busy else "linear-gradient(145deg, #10B981 0%, #059669 100%)"
             box_shadow = "0 8px 20px rgba(220, 38, 38, 0.28)" if is_busy else "0 8px 20px rgba(5, 150, 105, 0.28)"
             icon = "🛵" if is_busy else "🅿️"
@@ -388,7 +420,7 @@ else:
             </div>
             """
 
-        slot_panel_html = f"""
+        return f"""
         <!DOCTYPE html>
         <html>
         <head>
@@ -416,8 +448,8 @@ else:
                         <p style="color:#334155; font-size:14px; font-weight:500; margin-top:2px;">{L["map_sub"]}</p>
                     </div>
                     <div style="font-size:15px; font-weight:800; display:flex; gap:16px;">
-                        <span style="color:#059669;">● {L['free_txt']} ({available_count})</span>
-                        <span style="color:#DC2626;">● {L['busy_txt']} ({occupied_count})</span>
+                        <span style="color:#059669;">● {L['free_txt']} ({avail})</span>
+                        <span style="color:#DC2626;">● {L['busy_txt']} ({occ})</span>
                     </div>
                 </div>
                 <div class="grid-container">{slots_boxes}</div>
@@ -426,14 +458,15 @@ else:
         </html>
         """
 
-        if available_count == 0:
+    def build_side_component(avail):
+        if avail == 0:
             alert_title = "PARKING FULL" if selected_lang == "English" else "ที่จอดรถเต็ม"
             alert_msg = "No available slots left / ไม่มีช่องว่างพร้อมให้บริการ"
             alert_color = "#DC2626"
             alert_bg = "#FEF2F2"
-        elif available_count <= 2:
+        elif avail <= 2:
             alert_title = L["crit_title"]
-            alert_msg = L["crit_sub"].format(available_count)
+            alert_msg = L["crit_sub"].format(avail)
             alert_color = "#DC2626"
             alert_bg = "#FEF2F2"
         else:
@@ -444,7 +477,7 @@ else:
 
         logs_html = "".join([f"<li style='margin-bottom:8px; font-size:13px; color:#1E293B; font-weight:500;'>{log}</li>" for log in st.session_state["activity_logs"][:3]])
 
-        side_component = f"""
+        return f"""
         <!DOCTYPE html>
         <html>
         <head>
@@ -490,11 +523,15 @@ else:
         </html>
         """
 
-        if "Mobile" in view_mode:
-            components.html(slot_panel_html, height=iframe_height)
-            components.html(side_component, height=side_height)
+    # ส่วนแสดงผลแท็บที่ 1: Live Monitoring
+    if st.session_state["active_tab"] == "tab_live":
+        col_main, col_side = st.columns([7.2, 2.8]) if "Desktop" in view_mode else (st.container(), st.container())
+        
+        with col_main:
+            map_placeholder = st.empty()
+
             st.markdown("""
-            <div class="panel-box" style="margin-top: -8px;">
+            <div class="panel-box" style="margin-top: -6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                     <div>
                         <h4 style="margin:0; font-size:17px; font-weight:800; color:#0F172A;">📹 Live CCTV Feed & AI Bounding Box</h4>
@@ -503,39 +540,116 @@ else:
                     <span style="background:#FEF2F2; color:#DC2626; border:1px solid #FEE2E2; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:800;">● LIVE 1080P</span>
                 </div>
             """, unsafe_allow_html=True)
-            try:
-                st.image("parking_10slots.jpg", caption="Spatial Detection 10 Slots - SUT Zone B1", use_container_width=True)
-            except Exception:
-                st.info("💡 Place 'parking_10slots.jpg' in workspace directory")
+            cctv_slot = st.empty()
             st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            col_main, col_side = st.columns([7.2, 2.8])
-            with col_main:
-                components.html(slot_panel_html, height=iframe_height)
-                st.markdown("""
-                <div class="panel-box" style="margin-top: -6px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                        <div>
-                            <h4 style="margin:0; font-size:17px; font-weight:800; color:#0F172A;">📹 Live CCTV Feed & AI Bounding Box</h4>
-                            <p style="margin:0; font-size:13.5px; color:#334155; font-weight:500;">Zone B1 Learning Center 1</p>
-                        </div>
-                        <span style="background:#FEF2F2; color:#DC2626; border:1px solid #FEE2E2; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:800;">● LIVE 1080P</span>
-                    </div>
-                """, unsafe_allow_html=True)
-                try:
-                    st.image("parking_10slots.jpg", caption="Spatial Detection 10 Slots - SUT Zone B1", use_container_width=True)
-                except Exception:
-                    st.info("💡 Place 'parking_10slots.jpg' in workspace directory")
-                st.markdown("</div>", unsafe_allow_html=True)
-            with col_side:
-                components.html(side_component, height=side_height)
 
-    # Tab 2: Analytics & HeatMap
-    with tab_heatmap:
-        st.write("")
+        with col_side:
+            side_placeholder = st.empty()
+
+        video_source = "video_AI_Project_ENG51_1705.mp4" if os.path.exists("video_AI_Project_ENG51_1705.mp4") else "cctv_demo.mp4"
+        if os.path.exists(video_source):
+            cap = cv2.VideoCapture(video_source)
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25
+            
+            # ปรับความเร็ววิดีโอเป็น 2.0x เร็วสะใจ ลื่นไหล ไม่สโลว์
+            playback_speed = 2.0
+            frame_delay = (1.0 / fps) / playback_speed
+
+            while cap.isOpened() and st.session_state["active_tab"] == "tab_live":
+                loop_start = time.time()
+                ret, frame = cap.read()
+                if not ret:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    continue
+
+                frame = cv2.resize(frame, (1280, 720))
+
+                if yolo_model:
+                    results = yolo_model.predict(frame, conf=0.30, device=DEVICE, verbose=False)
+                    
+                    bike_boxes = []
+                    for box in results[0].boxes.xyxy.cpu().numpy():
+                        bx1, by1, bx2, by2 = map(int, box)
+                        cx = (bx1 + bx2) // 2
+                        cy = by2 - 8
+                        bike_boxes.append((cx, cy, bx1, by1, bx2, by2))
+
+                    raw_detected_flags = []
+                    for idx, poly in enumerate(SLOT_POLYGONS):
+                        is_occ = False
+                        for (cx, cy, bx1, by1, bx2, by2) in bike_boxes:
+                            if cv2.pointPolygonTest(poly, (float(cx), float(cy)), False) >= 0:
+                                is_occ = True
+                                break
+                            mid_x = (bx1 + bx2) // 2
+                            if cv2.pointPolygonTest(poly, (float(mid_x), float(by2 - 5)), False) >= 0:
+                                is_occ = True
+                                break
+                            if cv2.pointPolygonTest(poly, (float(bx1 + (bx2-bx1)//2), float(by1 + (by2-by1)//2)), False) >= 0:
+                                is_occ = True
+                                break
+                        raw_detected_flags.append(is_occ)
+
+                    st.session_state["slot_history_deep"].pop(0)
+                    st.session_state["slot_history_deep"].append(raw_detected_flags)
+
+                    # Advanced Hysteresis Lock
+                    stabilized_flags = []
+                    active_occupied = 0
+
+                    for s_idx in range(TOTAL_SLOTS):
+                        true_count = sum(1 for history in st.session_state["slot_history_deep"] if history[s_idx])
+                        false_count = 25 - true_count
+                        
+                        prev_state = st.session_state["current_slot_states"][s_idx]
+                        
+                        if not prev_state:
+                            if true_count >= 10:
+                                st.session_state["current_slot_states"][s_idx] = True
+                        else:
+                            if false_count >= 20:
+                                st.session_state["current_slot_states"][s_idx] = False
+                                
+                        final_is_occ = st.session_state["current_slot_states"][s_idx]
+                        stabilized_flags.append(final_is_occ)
+                        if final_is_occ:
+                            active_occupied += 1
+
+                    for idx, poly in enumerate(SLOT_POLYGONS):
+                        is_occ = stabilized_flags[idx]
+                        box_color = (0, 0, 255) if is_occ else (0, 255, 0)
+                        cv2.polylines(frame, [poly], isClosed=True, color=box_color, thickness=2)
+
+                    if detect_mode == "🤖 AI Real-Time Model":
+                        final_occ = active_occupied
+                        final_flags = stabilized_flags
+                    else:
+                        final_occ = occupied_count
+                        final_flags = [i <= occupied_count for i in range(1, TOTAL_SLOTS + 1)]
+
+                    final_avail = TOTAL_SLOTS - final_occ
+                    final_rate = (final_occ / TOTAL_SLOTS) * 100
+                    st.session_state["last_occupied"] = final_occ
+
+                    kpi_placeholder.markdown(render_kpi_cards(final_occ, final_avail, final_rate, today_avg_rate), unsafe_allow_html=True)
+                    with map_placeholder.container():
+                        components.html(build_slot_panel_html(final_flags, final_occ, final_avail), height=iframe_height)
+                    with side_placeholder.container():
+                        components.html(build_side_component(final_avail), height=side_height)
+
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                cctv_slot.image(frame_rgb, use_container_width=True)
+
+                elapsed = time.time() - loop_start
+                if elapsed < frame_delay:
+                    time.sleep(frame_delay - elapsed)
+
+            cap.release()
+
+    # ส่วนแสดงผลแท็บที่ 2: Analytics & HeatMap (เปิดดูได้ทันทีโดยที่แท็บยังอยู่บรรทัดเดิม)
+    else:
         g_col1, g_col2 = st.columns(2) if "Desktop" in view_mode else (st.container(), st.container())
 
-        # กล่องที่ 1: อัตราการใช้งานเฉลี่ยสะสมรายวัน
         with g_col1:
             with st.container(border=True):
                 st.markdown(f"""
@@ -547,11 +661,10 @@ else:
 
                 df_days = pd.DataFrame({
                     "Day": L["days"],
-                    "Rate": [72.0, 81.5, 76.0, 84.0, round(today_avg_rate, 1), 38.5, 26.0],
-                    "Color": ["#EAB308", "#EC4899", "#10B981", "#F97316", "#0284C7", "#8B5CF6", "#EF4444"]
+                    "Rate": [72.0, 81.5, 76.0, 84.0, 50.0, round(today_avg_rate, 1), 26.0],
+                    "Color": ["#EAB308", "#EC4899", "#10B981", "#F97316", "#8B5CF6", "#0284C7", "#EF4444"]
                 })
 
-                # ขยายความหนาแท่งกราฟเป็น size=32
                 chart_days = alt.Chart(df_days).mark_bar(cornerRadiusTopLeft=8, cornerRadiusTopRight=8, size=32).encode(
                     x=alt.X('Day:N', sort=None, axis=alt.Axis(title=None, labelAngle=-25, labelFontSize=11.5, labelColor='#1E293B', labelFontWeight='bold')),
                     y=alt.Y('Rate:Q', axis=alt.Axis(title='ความหนาแน่น (%)' if selected_lang == 'ไทย' else 'Occupancy (%)', labelFontSize=11.5, titleFontSize=11.5), scale=alt.Scale(domain=[0, 115])),
@@ -561,7 +674,6 @@ else:
 
                 st.altair_chart(chart_days, use_container_width=True)
 
-        # กล่องที่ 2: ความถี่การเข้า-ออกของรถในแต่ละช่อง
         with g_col2:
             with st.container(border=True):
                 st.markdown(f"""
@@ -577,7 +689,6 @@ else:
                 )
                 max_cycles = max(df_slots["Cycles"]) if len(df_slots) > 0 else 10
 
-                # ขยายความหนาแท่งกราฟเป็น size=22
                 chart_slots = alt.Chart(df_slots).mark_bar(cornerRadiusTopLeft=8, cornerRadiusTopRight=8, size=22, color='#2563EB').encode(
                     x=alt.X('Slot:N', axis=alt.Axis(title=None, labelAngle=-30, labelFontSize=11, labelColor='#1E293B', labelFontWeight='bold')),
                     y=alt.Y('Cycles:Q', axis=alt.Axis(title='รอบ / Cycles', labelFontSize=11.5, titleFontSize=11.5, tickMinStep=1), scale=alt.Scale(domain=[0, max_cycles + 2.5])),
@@ -586,7 +697,7 @@ else:
 
                 st.altair_chart(chart_slots, use_container_width=True)
 
-        # HeatMatrix 7 Days
+        # HeatMatrix (08:00 - 16:00 น.)
         time_cols = ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00"]
         active_time_label = time_cols[time_index]
 
@@ -602,10 +713,13 @@ else:
         """, unsafe_allow_html=True)
 
         table_rows = ""
-        for day_name, row in st.session_state["heatmap_matrix"].items():
-            is_today = "Today" in day_name or "วันนี้" in day_name
+        for r_idx, (day_name, row) in enumerate(st.session_state["heatmap_matrix"].items()):
+            is_today = (r_idx == today_weekday)
+            day_suffix = " (Today)" if selected_lang == "English" and is_today else " (วันนี้)" if selected_lang == "ไทย" and is_today else ""
+            display_day_label = f"{day_name}{day_suffix}"
+            
             day_label_style = "color:#EA580C; font-weight:800; background: rgba(255, 247, 237, 0.95);" if is_today else "color:#1E293B; font-weight:700; background: rgba(248, 250, 252, 0.95);"
-            row_tds = f"<td style='padding:8px 12px; font-size:13.5px; {day_label_style}'>{day_name}</td>"
+            row_tds = f"<td style='padding:8px 12px; font-size:13.5px; {day_label_style}'>{display_day_label}</td>"
             for idx, val in enumerate(row):
                 if is_today and idx == time_index:
                     bg = "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)"
